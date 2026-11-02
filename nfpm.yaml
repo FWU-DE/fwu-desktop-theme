@@ -22,5 +22,3 @@ overrides:
     recommends: [gnome-shell-extensions]
   rpm:
     recommends: [gnome-shell-extension-user-theme]
-  archlinux:
-    optdepends: ["gnome-shell-extensions: Shell-Theme für Leiste und Menüs"]
