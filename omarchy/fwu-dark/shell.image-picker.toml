@@ -1,0 +1,8 @@
+[image-picker]
+scrim                   = "#100e0d"
+scrim-alpha             = 0.6
+text                    = "#fff3e9"
+selected-border         = "#e96429"
+selected-border-alpha   = 1.0
+unselected-border       = "#fff3e9"
+unselected-border-alpha = 0.3

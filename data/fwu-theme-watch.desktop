@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FWU-Theme
+Comment=Hält das FWU-Theme passend zum Hell-/Dunkelmodus
+Exec=fwu-theme watch
+OnlyShowIn=GNOME;
+NoDisplay=true
+X-GNOME-Autostart-Phase=Applications

@@ -1,0 +1,13 @@
+[lock]
+# Sperrbildschirm in beiden Varianten dunkel, passend zum hellen unlock.png.
+background       = "#161412"
+background-alpha = 0.85
+text             = "#fff3e9"
+placeholder      = "#b3ab9b"
+text-error       = "#f55050"
+border           = "#e96429"
+border-active    = "#e96429"
+border-error     = "#f55050"
+border-alpha     = 0.9
+selection        = "#e96429"
+selection-alpha  = 0.45

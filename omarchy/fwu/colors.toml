@@ -1,0 +1,37 @@
+# FWU – Das Medieninstitut der Länder, helle Variante wie fwu.de.
+# Quelle: CSS-Variablen auf fwu.de (--color-morange #e96429, --color-offwhite
+# #fff9f4, --color-back1/2, --color-warmorange #ffdcbd). Das Markenorange hat
+# auf Off-White nur 3,2:1; Text-Akzente nutzen deshalb #ac4119.
+# Alle Grundfarben halten 4,6:1 auf allen Flächen und der Markierung
+# (#ffdcbd), die hellen Varianten auf allen Flächen.
+mode = "light"
+
+accent = "#ac4119"
+selection = "#ffdcbd"
+muted = "#696358"
+
+background = "#fff9f4"
+dark_background = "#fff3e9"
+darker_background = "#ffedde"
+lighter_background = "#ffffff"
+
+foreground = "#1d1a18"
+dark_foreground = "#59554c"
+light_foreground = "#000000"
+bright_foreground = "#000000"
+
+red = "#ba2c2c"
+yellow = "#7d5d00"
+orange = "#ac4119"
+green = "#297047"
+cyan = "#0e6b78"
+blue = "#1d4fb8"
+magenta = "#8e3fa8"
+brown = "#7a4a20"
+
+bright_red = "#cf2929"
+bright_yellow = "#876500"
+bright_green = "#317950"
+bright_cyan = "#147784"
+bright_blue = "#2a63d6"
+bright_magenta = "#9e43bc"

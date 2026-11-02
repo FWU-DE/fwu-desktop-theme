@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="542" viewBox="0 0 1200 542" font-family="Inter,system-ui,-apple-system,Segoe UI,sans-serif">
+<rect width="1200" height="542" rx="18" fill="#fff9f4"/>
+<text x="24" y="78" fill="#59554c" font-size="15" font-weight="600">Flächen</text>
+<rect x="130" y="40" width="120" height="64" rx="10" fill="#ffedde" stroke="#696358" stroke-opacity=".35"/>
+<text x="132" y="124" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#ffedde</text>
+<text x="132" y="141" fill="#59554c" font-size="11.5">darker background</text>
+<rect x="260" y="40" width="120" height="64" rx="10" fill="#fff3e9" stroke="#696358" stroke-opacity=".35"/>
+<text x="262" y="124" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#fff3e9</text>
+<text x="262" y="141" fill="#59554c" font-size="11.5">dark background</text>
+<rect x="390" y="40" width="120" height="64" rx="10" fill="#fff9f4" stroke="#696358" stroke-opacity=".35"/>
+<text x="392" y="124" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#fff9f4</text>
+<text x="392" y="141" fill="#59554c" font-size="11.5">background</text>
+<rect x="520" y="40" width="120" height="64" rx="10" fill="#ffffff" stroke="#696358" stroke-opacity=".35"/>
+<text x="522" y="124" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#ffffff</text>
+<text x="522" y="141" fill="#59554c" font-size="11.5">lighter background</text>
+<rect x="650" y="40" width="120" height="64" rx="10" fill="#ffdcbd" stroke="#696358" stroke-opacity=".35"/>
+<text x="652" y="124" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#ffdcbd</text>
+<text x="652" y="141" fill="#59554c" font-size="11.5">selection</text>
+<text x="24" y="206" fill="#59554c" font-size="15" font-weight="600">Text</text>
+<rect x="130" y="168" width="120" height="64" rx="10" fill="#1d1a18" stroke="#696358" stroke-opacity=".35"/>
+<text x="132" y="252" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#1d1a18</text>
+<text x="132" y="269" fill="#59554c" font-size="11.5">foreground</text>
+<rect x="260" y="168" width="120" height="64" rx="10" fill="#59554c" stroke="#696358" stroke-opacity=".35"/>
+<text x="262" y="252" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#59554c</text>
+<text x="262" y="269" fill="#59554c" font-size="11.5">dark foreground</text>
+<rect x="390" y="168" width="120" height="64" rx="10" fill="#696358" stroke="#696358" stroke-opacity=".35"/>
+<text x="392" y="252" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#696358</text>
+<text x="392" y="269" fill="#59554c" font-size="11.5">muted</text>
+<rect x="520" y="168" width="120" height="64" rx="10" fill="#ac4119" stroke="#696358" stroke-opacity=".35"/>
+<text x="522" y="252" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#ac4119</text>
+<text x="522" y="269" fill="#59554c" font-size="11.5">accent</text>
+<text x="24" y="334" fill="#59554c" font-size="15" font-weight="600">Farben</text>
+<rect x="130" y="296" width="120" height="64" rx="10" fill="#ba2c2c" stroke="#696358" stroke-opacity=".35"/>
+<text x="132" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#ba2c2c</text>
+<text x="132" y="397" fill="#59554c" font-size="11.5">red</text>
+<rect x="260" y="296" width="120" height="64" rx="10" fill="#ac4119" stroke="#696358" stroke-opacity=".35"/>
+<text x="262" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#ac4119</text>
+<text x="262" y="397" fill="#59554c" font-size="11.5">orange</text>
+<rect x="390" y="296" width="120" height="64" rx="10" fill="#7d5d00" stroke="#696358" stroke-opacity=".35"/>
+<text x="392" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#7d5d00</text>
+<text x="392" y="397" fill="#59554c" font-size="11.5">yellow</text>
+<rect x="520" y="296" width="120" height="64" rx="10" fill="#297047" stroke="#696358" stroke-opacity=".35"/>
+<text x="522" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#297047</text>
+<text x="522" y="397" fill="#59554c" font-size="11.5">green</text>
+<rect x="650" y="296" width="120" height="64" rx="10" fill="#0e6b78" stroke="#696358" stroke-opacity=".35"/>
+<text x="652" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#0e6b78</text>
+<text x="652" y="397" fill="#59554c" font-size="11.5">cyan</text>
+<rect x="780" y="296" width="120" height="64" rx="10" fill="#1d4fb8" stroke="#696358" stroke-opacity=".35"/>
+<text x="782" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#1d4fb8</text>
+<text x="782" y="397" fill="#59554c" font-size="11.5">blue</text>
+<rect x="910" y="296" width="120" height="64" rx="10" fill="#8e3fa8" stroke="#696358" stroke-opacity=".35"/>
+<text x="912" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#8e3fa8</text>
+<text x="912" y="397" fill="#59554c" font-size="11.5">magenta</text>
+<rect x="1040" y="296" width="120" height="64" rx="10" fill="#7a4a20" stroke="#696358" stroke-opacity=".35"/>
+<text x="1042" y="380" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#7a4a20</text>
+<text x="1042" y="397" fill="#59554c" font-size="11.5">brown</text>
+<text x="24" y="462" fill="#59554c" font-size="15" font-weight="600">Hell</text>
+<rect x="130" y="424" width="120" height="64" rx="10" fill="#cf2929" stroke="#696358" stroke-opacity=".35"/>
+<text x="132" y="508" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#cf2929</text>
+<text x="132" y="525" fill="#59554c" font-size="11.5">bright red</text>
+<rect x="260" y="424" width="120" height="64" rx="10" fill="#876500" stroke="#696358" stroke-opacity=".35"/>
+<text x="262" y="508" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#876500</text>
+<text x="262" y="525" fill="#59554c" font-size="11.5">bright yellow</text>
+<rect x="390" y="424" width="120" height="64" rx="10" fill="#317950" stroke="#696358" stroke-opacity=".35"/>
+<text x="392" y="508" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#317950</text>
+<text x="392" y="525" fill="#59554c" font-size="11.5">bright green</text>
+<rect x="520" y="424" width="120" height="64" rx="10" fill="#147784" stroke="#696358" stroke-opacity=".35"/>
+<text x="522" y="508" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#147784</text>
+<text x="522" y="525" fill="#59554c" font-size="11.5">bright cyan</text>
+<rect x="650" y="424" width="120" height="64" rx="10" fill="#2a63d6" stroke="#696358" stroke-opacity=".35"/>
+<text x="652" y="508" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#2a63d6</text>
+<text x="652" y="525" fill="#59554c" font-size="11.5">bright blue</text>
+<rect x="780" y="424" width="120" height="64" rx="10" fill="#9e43bc" stroke="#696358" stroke-opacity=".35"/>
+<text x="782" y="508" fill="#1d1a18" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">#9e43bc</text>
+<text x="782" y="525" fill="#59554c" font-size="11.5">bright magenta</text>
+</svg>
