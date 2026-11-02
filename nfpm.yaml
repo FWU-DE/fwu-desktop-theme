@@ -1,0 +1,26 @@
+# Pakete für Debian/Ubuntu, Fedora/openSUSE, Alpine und Arch – ohne Abhängigkeiten.
+# Gebaut von tools/package.sh; Inhalt kommt aus ./install.sh --destdir build/root.
+name: fwu-desktop-theme
+arch: all
+platform: linux
+version: ${VERSION}
+release: 1
+section: x11
+maintainer: FWU – Das Medieninstitut der Länder
+description: FWU-Theme für GNOME und Omarchy – Farben, Shell-Theme, Hintergrundbilder
+homepage: https://github.com/FWU-DE/fwu-desktop-theme
+license: Proprietary
+contents:
+  - src: build/root/usr
+    dst: /usr
+    type: tree
+  - src: build/root/etc/xdg/autostart/fwu-theme-watch.desktop
+    dst: /etc/xdg/autostart/fwu-theme-watch.desktop
+    type: config
+overrides:
+  deb:
+    recommends: [gnome-shell-extensions]
+  rpm:
+    recommends: [gnome-shell-extension-user-theme]
+  archlinux:
+    optdepends: ["gnome-shell-extensions: Shell-Theme für Leiste und Menüs"]

@@ -1,547 +1,286 @@
-#!/usr/bin/env python3
-"""fwu-theme – FWU-Theme für GNOME (und Omarchy) einrichten.
-
-  fwu-theme apply [light|dark] [--wallpaper MOTIV] [--flatpak]
-  fwu-theme wallpaper [MOTIV|next|list]
-  fwu-theme omarchy [--force]
-  fwu-theme status
-  fwu-theme reset
-
-Everything follows GNOME's dark-mode switch: `apply` turns the theme on and
-starts a small watcher (also started at login via /etc/xdg/autostart) that
-re-applies the matching light or dark parts whenever the switch changes.
-"""
-import colorsys
-import fcntl
-import json
-import os
-import re
-import shutil
-import signal
-import subprocess
-import sys
-from pathlib import Path
-
-DATA = Path(os.environ.get("FWU_THEME_DATA", "/usr/share/fwu-desktop-theme"))
-HOME = Path.home()
-CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
-DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
-STATE = CONFIG_HOME / "fwu-desktop-theme"
-ENABLED = STATE / "enabled"
-LOCK = STATE / "watch.pid"
-
-SHELL_THEMES = {"light": "FWU", "dark": "FWU-Dark"}
-USER_THEME_EXT = "user-theme@gnome-shell-extensions.gcampax.github.com"
-USER_THEME_SCHEMA = "org.gnome.shell.extensions.user-theme"
-SHELL_GRESOURCE = "/usr/share/gnome-shell/gnome-shell-theme.gresource"
-INTERFACE = "org.gnome.desktop.interface"
-BACKGROUND = "org.gnome.desktop.background"
-SCREENSAVER = "org.gnome.desktop.screensaver"
-BEGIN = "/* >>> fwu-desktop-theme >>> (verwaltet von fwu-theme, nicht bearbeiten) */"
-END = "/* <<< fwu-desktop-theme <<< */"
-
-
-def load():
-    return json.loads((DATA / "palettes.json").read_text())
-
-
-def say(msg):
-    print(f"fwu-theme: {msg}")
-
-
-# --- gsettings ---------------------------------------------------------------
-
-def gget(schema, key):
-    r = subprocess.run(["gsettings", "get", schema, key], capture_output=True, text=True)
-    return r.stdout.strip().strip("'") if r.returncode == 0 else None
-
-
-def gset(schema, key, value):
-    subprocess.run(["gsettings", "set", schema, key, value], capture_output=True)
-
-
-def greset(schema, key):
-    subprocess.run(["gsettings", "reset", schema, key], capture_output=True)
-
-
-def has_schema(schema):
-    r = subprocess.run(["gsettings", "list-keys", schema], capture_output=True)
-    return r.returncode == 0
-
-
-def current_mode():
-    return "dark" if gget(INTERFACE, "color-scheme") == "prefer-dark" else "light"
-
-
-# --- colours -----------------------------------------------------------------
-
-def rgb(hexstr):
-    h = hexstr.lstrip("#")
-    if len(h) == 3:
-        h = "".join(c * 2 for c in h)
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-
-
-def hexc(r, g, b):
-    return "#%02x%02x%02x" % tuple(max(0, min(255, round(v))) for v in (r, g, b))
-
-
-def mix(a, b, t):
-    """Mix colour b into a by t (0..1)."""
-    (r1, g1, b1), (r2, g2, b2) = rgb(a), rgb(b)
-    return hexc(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t)
-
-
-def rgba(hexstr, alpha):
-    return "rgba(%d, %d, %d, %s)" % (*rgb(hexstr), alpha)
-
-
-def adw_colors(mode, p):
-    """libadwaita's named colours for one mode, filled from the FWU palette."""
-    fg, bg = p["foreground"], p["background"]
-    if mode == "light":
-        c = {
-            "window_bg": bg, "view_bg": p["lighter_background"],
-            "headerbar_bg": p["dark_background"], "headerbar_backdrop": bg,
-            "sidebar_bg": p["dark_background"], "sidebar_backdrop": bg,
-            "secondary_sidebar_bg": bg, "secondary_sidebar_backdrop": bg,
-            "card_bg": p["lighter_background"], "thumbnail_bg": p["lighter_background"],
-            "popover_bg": p["lighter_background"], "dialog_bg": bg,
-            "shade": rgba("#3a1a0a", 0.07),
-        }
-    else:
-        raised = mix(p["lighter_background"], fg, 0.05)
-        c = {
-            "window_bg": bg, "view_bg": p["dark_background"],
-            "headerbar_bg": p["lighter_background"], "headerbar_backdrop": bg,
-            "sidebar_bg": p["lighter_background"], "sidebar_backdrop": bg,
-            "secondary_sidebar_bg": bg, "secondary_sidebar_backdrop": p["dark_background"],
-            "card_bg": rgba(fg, 0.06), "thumbnail_bg": raised,
-            "popover_bg": raised, "dialog_bg": p["lighter_background"],
-            "shade": rgba("#000000", 0.36),
-        }
-    for k in ("window", "view", "headerbar", "sidebar", "secondary_sidebar",
-              "card", "thumbnail", "popover", "dialog"):
-        c[f"{k}_fg"] = fg
-    c.update({
-        "accent": p["accent"], "accent_bg": p["accent_bg"], "accent_fg": "#ffffff",
-        "destructive": p["red"], "destructive_bg": "#ba2c2c", "destructive_fg": "#ffffff",
-        "success": p["green"], "success_bg": "#297047", "success_fg": "#ffffff",
-        "warning": p["yellow"], "warning_bg": "#7d5d00", "warning_fg": "#ffffff",
-        "error": p["red"], "error_bg": "#ba2c2c", "error_fg": "#ffffff",
-    })
-    return {k + "_color": v for k, v in c.items()}
-
-
-def define_colors(colors):
-    return "".join(f"@define-color {k} {v};\n" for k, v in colors.items())
-
-
-def css_vars(colors, indent="  "):
-    return "\n".join(f"{indent}--{k.replace('_', '-')}: {v};" for k, v in colors.items())
-
-
-def adw_version():
-    try:
-        import gi
-        gi.require_version("Adw", "1")
-        from gi.repository import Adw
-        return (Adw.get_major_version(), Adw.get_minor_version())
-    except Exception:
-        return None
-
-
-def gtk4_css(data, mode):
-    light = adw_colors("light", data["palettes"]["light"])
-    dark = adw_colors("dark", data["palettes"]["dark"])
-    out = ["/* Erzeugt von fwu-theme – Änderungen werden überschrieben. */\n"]
-    ver = adw_version()
-    # libadwaita 1.6+ reads CSS variables and switches with the media query;
-    # older versions only know @define-color, rewritten by the watcher.
-    if ver is None or ver < (1, 6):
-        out.append(define_colors(light if mode == "light" else dark))
-    if ver is None or ver >= (1, 6):
-        out.append(":root {\n" + css_vars(light) + "\n}\n")
-        out.append("@media (prefers-color-scheme: dark) {\n  :root {\n"
-                   + css_vars(dark, "    ") + "\n  }\n}\n")
-    return "\n".join(out)
-
-
-def gtk3_css(data, mode):
-    p = data["palettes"][mode]
-    c = adw_colors(mode, p)
-    # Adwaita (GTK 3) names first, then the libadwaita names adw-gtk3 uses.
-    legacy = {
-        "theme_bg_color": c["window_bg_color"],
-        "theme_fg_color": p["foreground"],
-        "theme_base_color": c["view_bg_color"],
-        "theme_text_color": p["foreground"],
-        "theme_selected_bg_color": p["accent_bg"],
-        "theme_selected_fg_color": "#ffffff",
-        "theme_unfocused_bg_color": p["background"],
-        "theme_unfocused_fg_color": p["foreground"],
-        "theme_unfocused_selected_bg_color": p["accent_bg"],
-        "theme_unfocused_selected_fg_color": "#ffffff",
-    }
-    return ("/* Erzeugt von fwu-theme – Änderungen werden überschrieben. */\n"
-            + define_colors(legacy) + define_colors(c))
-
-
-# --- GNOME Shell -------------------------------------------------------------
-
-HEX = re.compile(r"#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
-RGB = re.compile(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)")
-
-
-def shell_source(mode):
-    from gi.repository import Gio
-    res = Gio.Resource.load(SHELL_GRESOURCE)
-    for name in (f"gnome-shell-{mode}.css", "gnome-shell.css"):
-        try:
-            return res.lookup_data(f"/org/gnome/shell/theme/{name}", 0).get_data().decode()
-        except Exception:
-            continue
-    raise RuntimeError("kein Stylesheet in " + SHELL_GRESOURCE)
-
-
-def recolor(r, g, b, warm_hue, accent):
-    """Warm up neutral greys; turn the old Adwaita blue into FWU orange."""
-    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-    if max(r, g, b) - min(r, g, b) <= 8:
-        if l <= 0.02 or l >= 0.995:
-            return None
-        s = 0.10 if l < 0.5 else 0.25
-        return colorsys.hls_to_rgb(warm_hue, l, s)
-    if s > 0.4 and 195 / 360 <= h <= 235 / 360:
-        ah, _, as_ = colorsys.rgb_to_hls(*(v / 255 for v in rgb(accent)))
-        return colorsys.hls_to_rgb(ah, l, as_)
-    return None
-
-
-def shell_css(data, mode):
-    p = data["palettes"][mode]
-    css = shell_source(mode)
-    css = css.replace("-st-accent-fg-color", "#ffffff").replace("-st-accent-color", p["accent_bg"])
-    warm_hue = colorsys.rgb_to_hls(*(v / 255 for v in rgb(p["background"])))[0]
-
-    def sub_hex(m):
-        new = recolor(*rgb(m.group(0)), warm_hue, p["accent_bg"])
-        return hexc(*(v * 255 for v in new)) if new else m.group(0)
-
-    def sub_rgb(m):
-        r, g, b = (int(v) for v in m.groups())
-        new = recolor(r, g, b, warm_hue, p["accent_bg"])
-        if not new:
-            return m.group(0)
-        head = m.group(0).split("(")[0]
-        return "%s(%d, %d, %d" % (head, *(round(v * 255) for v in new))
-
-    css = HEX.sub(sub_hex, css)
-    css = RGB.sub(sub_rgb, css)
-    return ("/* FWU – erzeugt von fwu-theme aus dem GNOME-Shell-Stylesheet dieses Systems. */\n" + css)
-
-
-def write_shell_themes(data):
-    for mode, name in SHELL_THEMES.items():
-        d = DATA_HOME / "themes" / name / "gnome-shell"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "gnome-shell.css").write_text(shell_css(data, mode))
-
-
-def user_theme_available():
-    r = subprocess.run(["gnome-extensions", "info", USER_THEME_EXT], capture_output=True)
-    return r.returncode == 0
-
-
-def enable_user_theme():
-    if not user_theme_available():
-        return False
-    subprocess.run(["gnome-extensions", "enable", USER_THEME_EXT], capture_output=True)
-    return True
-
-
-def user_theme_set(name):
-    """Set the shell theme by schema, falling back to the extension's own schema dir."""
-    if has_schema(USER_THEME_SCHEMA):
-        gset(USER_THEME_SCHEMA, "name", name)
-        return True
-    for base in (DATA_HOME / "gnome-shell/extensions", Path("/usr/share/gnome-shell/extensions")):
-        schemas = base / USER_THEME_EXT / "schemas"
-        if schemas.is_dir():
-            subprocess.run(["gsettings", "--schemadir", str(schemas), "set",
-                            USER_THEME_SCHEMA, "name", name], capture_output=True)
-            return True
-    return False
-
-
-# --- gtk.css blocks ----------------------------------------------------------
-
-def set_block(path, body):
-    """Put our managed block at the top of a gtk.css (@import must come first)."""
-    text = path.read_text() if path.exists() else ""
-    text = re.sub(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", "", text, flags=re.S)
-    if body:
-        text = f"{BEGIN}\n{body}\n{END}\n" + text
-    if text.strip():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    elif path.exists():
-        path.unlink()
-
-
-def write_gtk(data, mode):
-    for ver, css in (("gtk-4.0", gtk4_css(data, mode)), ("gtk-3.0", gtk3_css(data, mode))):
-        d = CONFIG_HOME / ver
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "fwu-desktop-theme.css").write_text(css)
-        set_block(d / "gtk.css", '@import url("fwu-desktop-theme.css");')
-
-
-# --- icons, wallpaper --------------------------------------------------------
-
-def icon_theme(p, mode):
-    name = p.get("icons", "")
-    if not name:
-        return None
-    base = name[:-5] if name.endswith("-dark") else name
-    for candidate in ([base + "-dark", base] if mode == "dark" else [base]):
-        for root in (DATA_HOME / "icons", HOME / ".icons", Path("/usr/share/icons")):
-            if (root / candidate).is_dir():
-                return candidate
-    return None
-
-
-def find_wallpaper(data, motif):
-    for e in data["wallpapers"]:
-        if e["motif"] == motif:
-            return e
-    return None
-
-
-def current_wallpaper(data):
-    uri = gget(BACKGROUND, "picture-uri") or ""
-    for e in data["wallpapers"]:
-        if uri.endswith(e["light"]) or uri.endswith(e["dark"]):
-            return e
-    return None
-
-
-def set_wallpaper(e):
-    gset(BACKGROUND, "picture-uri", "file://" + e["light"])
-    gset(BACKGROUND, "picture-uri-dark", "file://" + e["dark"])
-    gset(BACKGROUND, "picture-options", "zoom")
-    gset(SCREENSAVER, "picture-uri", "file://" + e["dark"])
-
-
-# --- sync / watch ------------------------------------------------------------
-
-def sync(data):
-    """Bring every mode-dependent part in line with GNOME's dark-mode switch."""
-    mode = current_mode()
-    p = data["palettes"][mode]
-    write_gtk(data, mode)
-    icons = icon_theme(p, mode)
-    if icons:
-        gset(INTERFACE, "icon-theme", icons)
-    user_theme_set(SHELL_THEMES[mode])
-    return mode
-
-
-def watcher_pid():
-    try:
-        pid = int(LOCK.read_text())
-        os.kill(pid, 0)
-        return pid
-    except (OSError, ValueError):
-        return None
-
-
-def start_watcher():
-    if watcher_pid():
-        return
-    subprocess.Popen([sys.argv[0], "watch"], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-
-
-def cmd_watch(_args):
-    if not ENABLED.exists():
-        return 0
-    STATE.mkdir(parents=True, exist_ok=True)
-    lock = open(STATE / "watch.lock", "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return 0
-    LOCK.write_text(str(os.getpid()))
-    data = load()
-    # Regenerate at every login so the shell theme matches an updated GNOME.
-    try:
-        write_shell_themes(data)
-    except Exception as e:
-        say(f"Shell-Theme nicht erzeugt: {e}")
-    mon = subprocess.Popen(["gsettings", "monitor", INTERFACE, "color-scheme"],
-                           stdout=subprocess.PIPE, text=True)
-    signal.signal(signal.SIGTERM, lambda *_: (mon.terminate(), sys.exit(0)))
-    last = sync(data)
-    for _line in mon.stdout:
-        if not ENABLED.exists():
-            break
-        mode = current_mode()
-        if mode != last:
-            last = sync(data)
-    mon.terminate()
-    return 0
-
-
-# --- commands ----------------------------------------------------------------
-
-def cmd_apply(args):
-    data = load()
-    mode = next((a for a in args if a in ("light", "dark")), None)
-    if mode:
-        gset(INTERFACE, "color-scheme", "prefer-dark" if mode == "dark" else "default")
-
-    gset(INTERFACE, "accent-color", "orange")  # for apps that skip gtk.css (e.g. Flatpak)
-
-    motif = opt(args, "--wallpaper")
-    e = find_wallpaper(data, motif) if motif else (current_wallpaper(data) or data["wallpapers"][0])
-    if not e:
-        say(f"unbekanntes Motiv: {motif} (siehe: fwu-theme wallpaper list)")
-        return 1
-    set_wallpaper(e)
-
-    shell_ok = True
-    try:
-        write_shell_themes(data)
-    except Exception as ex:
-        shell_ok = False
-        say(f"Shell-Theme übersprungen: {ex}")
-    STATE.mkdir(parents=True, exist_ok=True)
-    ENABLED.touch()
-    mode = sync(data)
-    start_watcher()
-
-    if "--flatpak" in args and shutil.which("flatpak"):
-        subprocess.run(["flatpak", "override", "--user",
-                        "--filesystem=xdg-config/gtk-4.0:ro",
-                        "--filesystem=xdg-config/gtk-3.0:ro"])
-        say("Flatpak-Apps lesen jetzt ebenfalls die FWU-Farben.")
-
-    say(f"FWU-Theme aktiv ({'dunkel' if mode == 'dark' else 'hell'}, folgt dem Dunkelmodus-Schalter).")
-    say(f"Hintergrund: {e['title']}")
-    if shell_ok and not enable_user_theme():
-        say("Für das Shell-Theme (Leiste, Menüs) fehlt die GNOME-Erweiterung »User Themes«:")
-        say("  Debian/Ubuntu: sudo apt install gnome-shell-extensions")
-        say("  Fedora:        sudo dnf install gnome-shell-extension-user-theme")
-        say("  Arch:          sudo pacman -S gnome-shell-extensions")
-        say("danach abmelden, anmelden und `fwu-theme apply` erneut ausführen.")
-    say("Bereits geöffnete Programme übernehmen die Farben nach einem Neustart.")
-    return 0
-
-
-def cmd_wallpaper(args):
-    data = load()
-    arg = args[0] if args else "next"
-    if arg == "list":
-        cur = current_wallpaper(data)
-        for e in data["wallpapers"]:
-            mark = "*" if cur and cur["motif"] == e["motif"] else " "
-            print(f"{mark} {e['motif']:<14} {e['title']}")
-        return 0
-    if arg == "next":
-        cur = current_wallpaper(data)
-        motifs = [e["motif"] for e in data["wallpapers"]]
-        i = (motifs.index(cur["motif"]) + 1) % len(motifs) if cur else 0
-        e = data["wallpapers"][i]
-    else:
-        e = find_wallpaper(data, arg)
-        if not e:
-            say(f"unbekanntes Motiv: {arg} (siehe: fwu-theme wallpaper list)")
-            return 1
-    set_wallpaper(e)
-    say(f"Hintergrund: {e['title']}")
-    return 0
-
-
-def cmd_omarchy(args):
-    """Link the packaged Omarchy themes, so no GitHub access is needed."""
-    dest = CONFIG_HOME / "omarchy/themes"
-    dest.mkdir(parents=True, exist_ok=True)
-    for src in sorted((DATA / "omarchy").iterdir()):
-        target = dest / src.name
-        if target.is_symlink():
-            target.unlink()
-        elif target.exists():
-            if "--force" not in args:
-                say(f"{target} existiert schon (z. B. per git installiert) – mit --force ersetzen.")
-                continue
-            shutil.rmtree(target)
-        target.symlink_to(src)
-        say(f"Omarchy-Theme {src.name} → {target}")
-    say("Aktivieren mit: omarchy theme set fwu   bzw.   omarchy theme set fwu-dark")
-    return 0
-
-
-def cmd_status(_args):
-    data = load()
-    cur = current_wallpaper(data)
-    rows = [
-        ("aktiv", "ja" if ENABLED.exists() else "nein"),
-        ("Modus", current_mode()),
-        ("Watcher", f"läuft (PID {watcher_pid()})" if watcher_pid() else "läuft nicht"),
-        ("Hintergrund", cur["title"] if cur else "kein FWU-Motiv"),
-        ("Icons", gget(INTERFACE, "icon-theme")),
-        ("Akzent", gget(INTERFACE, "accent-color")),
-        ("User Themes", "installiert" if user_theme_available() else "fehlt"),
-    ]
-    for k, v in rows:
-        print(f"{k:<12} {v}")
-    return 0
-
-
-def cmd_reset(_args):
-    pid = watcher_pid()
-    if ENABLED.exists():
-        ENABLED.unlink()
-    if pid:
-        os.kill(pid, signal.SIGTERM)
-    for ver in ("gtk-4.0", "gtk-3.0"):
-        d = CONFIG_HOME / ver
-        set_block(d / "gtk.css", "")
-        (d / "fwu-desktop-theme.css").unlink(missing_ok=True)
-    for name in SHELL_THEMES.values():
-        shutil.rmtree(DATA_HOME / "themes" / name, ignore_errors=True)
-    user_theme_set("")
-    if current_wallpaper(load()):
-        for schema, key in ((BACKGROUND, "picture-uri"), (BACKGROUND, "picture-uri-dark"),
-                            (SCREENSAVER, "picture-uri")):
-            greset(schema, key)
-    for key in ("accent-color", "icon-theme"):
-        greset(INTERFACE, key)
-    say("FWU-Theme entfernt (Dunkelmodus-Einstellung bleibt, wie sie ist).")
-    return 0
-
-
-def opt(args, name):
-    for i, a in enumerate(args):
-        if a == name and i + 1 < len(args):
-            return args[i + 1]
-        if a.startswith(name + "="):
-            return a.split("=", 1)[1]
-    return None
-
-
-COMMANDS = {"apply": cmd_apply, "wallpaper": cmd_wallpaper, "omarchy": cmd_omarchy,
-            "status": cmd_status, "reset": cmd_reset, "watch": cmd_watch}
-
-
-def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
-        print(__doc__.strip().split("\n\nEverything")[0])
-        return 0 if len(sys.argv) < 2 else 2
-    return COMMANDS[sys.argv[1]](sys.argv[2:])
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+#!/bin/sh
+# fwu-theme – FWU-Theme für GNOME und Omarchy einrichten.
+#
+#   fwu-theme apply [light|dark] [--wallpaper MOTIV] [--flatpak]
+#   fwu-theme wallpaper [MOTIV|next|list]
+#   fwu-theme omarchy [--force]
+#   fwu-theme status
+#   fwu-theme reset
+#
+# Everything follows GNOME's dark-mode switch: `apply` turns the theme on and
+# starts a watcher (also started at login by the autostart entry) that swaps
+# the light and dark parts whenever the switch changes. Needs only a POSIX
+# shell and gsettings, which every GNOME has.
+
+set -u
+
+DATA=
+for d in "${FWU_THEME_DATA:-}" "${XDG_DATA_HOME:-$HOME/.local/share}/fwu-desktop-theme" \
+         /usr/local/share/fwu-desktop-theme /usr/share/fwu-desktop-theme; do
+  if [ -n "$d" ] && [ -f "$d/gnome/wallpapers.tsv" ]; then DATA=$d; break; fi
+done
+
+CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
+LOCAL=${XDG_DATA_HOME:-$HOME/.local/share}
+STATE=$CONFIG/fwu-desktop-theme
+ENABLED=$STATE/enabled
+PIDFILE=$STATE/watch.pid
+TAB=$(printf '\t')
+
+INTERFACE=org.gnome.desktop.interface
+BACKGROUND=org.gnome.desktop.background
+SCREENSAVER=org.gnome.desktop.screensaver
+USER_THEME=org.gnome.shell.extensions.user-theme
+USER_THEME_EXT=user-theme@gnome-shell-extensions.gcampax.github.com
+BEGIN='/* >>> fwu-desktop-theme >>> (verwaltet von fwu-theme, nicht bearbeiten) */'
+END='/* <<< fwu-desktop-theme <<< */'
+
+say() { echo "fwu-theme: $*"; }
+die() { say "$*" >&2; exit 1; }
+
+usage() { sed -n '2,9s/^# \{0,1\}//p' "$0"; }
+
+need_data() { [ -n "$DATA" ] || die "Theme-Dateien nicht gefunden – erst ./install.sh ausführen."; }
+
+gget() { gsettings get "$1" "$2" 2>/dev/null | sed "s/^'//; s/'\$//"; }
+gset() { gsettings set "$@" >/dev/null 2>&1; }
+greset() { gsettings reset "$1" "$2" >/dev/null 2>&1; }
+
+mode() { [ "$(gget $INTERFACE color-scheme)" = prefer-dark ] && echo dark || echo light; }
+shell_theme() { [ "$1" = dark ] && echo FWU-Dark || echo FWU; }
+
+# --- gtk.css: our block goes first, because @import must come first ---------
+
+set_block() { # FILE [BODY]
+  file=$1 body=${2:-}
+  rest=
+  [ -f "$file" ] && rest=$(awk -v b="$BEGIN" -v e="$END" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$file")
+  if [ -n "$body" ]; then
+    mkdir -p "$(dirname "$file")"
+    { printf '%s\n%s\n%s\n' "$BEGIN" "$body" "$END"; [ -n "$rest" ] && printf '%s\n' "$rest"; } > "$file"
+  elif [ -n "$rest" ]; then
+    printf '%s\n' "$rest" > "$file"
+  else
+    rm -f "$file"
+  fi
+}
+
+# --- shell theme ---------------------------------------------------------------
+
+user_theme_installed() { gnome-extensions info $USER_THEME_EXT >/dev/null 2>&1; }
+
+user_theme_set() {
+  if gsettings list-keys $USER_THEME >/dev/null 2>&1; then
+    gset $USER_THEME name "$1"; return
+  fi
+  for base in "$LOCAL/gnome-shell/extensions" /usr/share/gnome-shell/extensions; do
+    if [ -d "$base/$USER_THEME_EXT/schemas" ]; then
+      gsettings --schemadir "$base/$USER_THEME_EXT/schemas" set $USER_THEME name "$1" >/dev/null 2>&1
+      return
+    fi
+  done
+}
+
+# --- icons ---------------------------------------------------------------------
+
+icon_theme() { # MODE -> installed icon theme name, or nothing
+  name=$(awk -F"$TAB" -v m="$1" '$1==m{print $2}' "$DATA/gnome/icons")
+  for root in "$LOCAL/icons" "$HOME/.icons" /usr/share/icons; do
+    [ -n "$name" ] && [ -d "$root/$name" ] && { echo "$name"; return; }
+  done
+  base=${name%-dark}
+  for root in "$LOCAL/icons" "$HOME/.icons" /usr/share/icons; do
+    [ -n "$base" ] && [ -d "$root/$base" ] && { echo "$base"; return; }
+  done
+}
+
+# --- wallpapers ------------------------------------------------------------------
+
+wallpaper_row() { # MOTIF -> tsv row
+  awk -F"$TAB" -v m="$1" '$1==m' "$DATA/gnome/wallpapers.tsv"
+}
+
+current_motif() {
+  uri=$(gget $BACKGROUND picture-uri)
+  while IFS=$TAB read -r m _title light dark; do
+    case $uri in *"/themes/$light"|*"/themes/$dark") echo "$m"; return ;; esac
+  done < "$DATA/gnome/wallpapers.tsv"
+}
+
+set_wallpaper() { # MOTIF
+  row=$(wallpaper_row "$1")
+  [ -n "$row" ] || die "unbekanntes Motiv: $1 (siehe: fwu-theme wallpaper list)"
+  light=$(echo "$row" | cut -f3) dark=$(echo "$row" | cut -f4)
+  gset $BACKGROUND picture-uri "file://$DATA/themes/$light"
+  gset $BACKGROUND picture-uri-dark "file://$DATA/themes/$dark"
+  gset $BACKGROUND picture-options zoom
+  gset $SCREENSAVER picture-uri "file://$DATA/themes/$dark"
+  say "Hintergrund: $(echo "$row" | cut -f2)"
+}
+
+# --- sync / watch ------------------------------------------------------------------
+
+sync() {
+  m=$(mode)
+  for v in gtk-4.0 gtk-3.0; do
+    mkdir -p "$CONFIG/$v"
+    cp "$DATA/gnome/$v/$m.css" "$CONFIG/$v/fwu-desktop-theme.css"
+    set_block "$CONFIG/$v/gtk.css" '@import url("fwu-desktop-theme.css");'
+  done
+  icons=$(icon_theme "$m")
+  [ -n "$icons" ] && gset $INTERFACE icon-theme "$icons"
+  user_theme_set "$(shell_theme "$m")"
+}
+
+watcher_pid() {
+  pid=$(cat "$PIDFILE" 2>/dev/null) || return 1
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+cmd_watch() {
+  [ -f "$ENABLED" ] || exit 0
+  need_data
+  watcher_pid >/dev/null && exit 0
+  echo $$ > "$PIDFILE"
+  sync
+  last=$(mode)
+  gsettings monitor $INTERFACE color-scheme | while read -r _; do
+    [ -f "$ENABLED" ] || break
+    now=$(mode)
+    [ "$now" != "$last" ] && { sync; last=$now; }
+  done
+}
+
+start_watcher() {
+  watcher_pid >/dev/null && return
+  nohup "$0" watch >/dev/null 2>&1 &
+}
+
+# --- commands ----------------------------------------------------------------------
+
+cmd_apply() {
+  need_data
+  want= motif= flatpak=
+  while [ $# -gt 0 ]; do
+    case $1 in
+      light|dark) want=$1 ;;
+      --wallpaper) motif=${2:-}; shift ;;
+      --wallpaper=*) motif=${1#*=} ;;
+      --flatpak) flatpak=1 ;;
+      *) die "unbekannte Option: $1" ;;
+    esac
+    shift
+  done
+  case $want in
+    dark) gset $INTERFACE color-scheme prefer-dark ;;
+    light) gset $INTERFACE color-scheme default ;;
+  esac
+  gset $INTERFACE accent-color orange   # for apps that skip gtk.css
+  [ -n "$motif" ] || motif=$(current_motif)
+  set_wallpaper "${motif:-fwu-logo}"
+
+  mkdir -p "$STATE"
+  touch "$ENABLED"
+  sync
+  start_watcher
+
+  if [ -n "$flatpak" ] && command -v flatpak >/dev/null; then
+    flatpak override --user --filesystem=xdg-config/gtk-4.0:ro --filesystem=xdg-config/gtk-3.0:ro
+    say "Flatpak-Apps lesen jetzt ebenfalls die FWU-Farben."
+  fi
+
+  [ "$(mode)" = dark ] && m=dunkel || m=hell
+  say "FWU-Theme aktiv ($m, folgt dem Dunkelmodus-Schalter)."
+  if user_theme_installed; then
+    gnome-extensions enable $USER_THEME_EXT >/dev/null 2>&1
+  else
+    say "Für Leiste und Menüs fehlt die GNOME-Erweiterung »User Themes«:"
+    say "  Debian/Ubuntu: sudo apt install gnome-shell-extensions"
+    say "  Fedora:        sudo dnf install gnome-shell-extension-user-theme"
+    say "  Arch:          sudo pacman -S gnome-shell-extensions"
+    say "danach ab- und wieder anmelden und »fwu-theme apply« erneut ausführen."
+  fi
+  say "Bereits geöffnete Programme übernehmen die Farben nach einem Neustart."
+}
+
+cmd_wallpaper() {
+  need_data
+  arg=${1:-next}
+  case $arg in
+    list)
+      cur=$(current_motif)
+      while IFS=$TAB read -r m title _light _dark; do
+        [ "$m" = "$cur" ] && mark='*' || mark=' '
+        printf '%s %-14s %s\n' "$mark" "$m" "$title"
+      done < "$DATA/gnome/wallpapers.tsv" ;;
+    next)
+      cur=$(current_motif)
+      next=$(awk -F"$TAB" -v c="$cur" 'found{print $1; exit} $1==c{found=1}' "$DATA/gnome/wallpapers.tsv")
+      [ -n "$next" ] || next=$(head -n1 "$DATA/gnome/wallpapers.tsv" | cut -f1)
+      set_wallpaper "$next" ;;
+    *) set_wallpaper "$arg" ;;
+  esac
+}
+
+cmd_omarchy() {
+  need_data
+  dest=$CONFIG/omarchy/themes
+  mkdir -p "$dest"
+  for src in "$DATA"/themes/*/; do
+    src=${src%/} name=$(basename "$src")
+    if [ -L "$dest/$name" ]; then
+      rm "$dest/$name"
+    elif [ -e "$dest/$name" ]; then
+      if [ "${1:-}" != --force ]; then
+        say "$dest/$name existiert schon – mit »fwu-theme omarchy --force« ersetzen."
+        continue
+      fi
+      rm -rf "$dest/$name"
+    fi
+    ln -s "$src" "$dest/$name"
+    say "Omarchy-Theme $name → $dest/$name"
+  done
+  say "Aktivieren mit: omarchy theme set fwu   bzw.   omarchy theme set fwu-dark"
+}
+
+cmd_status() {
+  need_data
+  [ -f "$ENABLED" ] && on=ja || on=nein
+  pid=$(watcher_pid) && w="läuft (PID $pid)" || w="läuft nicht"
+  user_theme_installed && ut=installiert || ut=fehlt
+  cur=$(current_motif)
+  printf '%-12s %s\n' Daten "$DATA" aktiv "$on" Modus "$(mode)" Watcher "$w" \
+    Hintergrund "${cur:-kein FWU-Motiv}" Icons "$(gget $INTERFACE icon-theme)" \
+    Akzent "$(gget $INTERFACE accent-color)" "User Themes" "$ut"
+}
+
+cmd_reset() {
+  rm -f "$ENABLED"
+  pid=$(watcher_pid) && kill "$pid" 2>/dev/null
+  pkill -f "gsettings monitor $INTERFACE color-scheme" 2>/dev/null
+  rm -f "$PIDFILE"
+  for v in gtk-4.0 gtk-3.0; do
+    set_block "$CONFIG/$v/gtk.css"
+    rm -f "$CONFIG/$v/fwu-desktop-theme.css"
+  done
+  case $(gget $USER_THEME name) in FWU|FWU-Dark) user_theme_set "" ;; esac
+  if [ -n "$DATA" ] && [ -n "$(current_motif)" ]; then
+    greset $BACKGROUND picture-uri; greset $BACKGROUND picture-uri-dark; greset $SCREENSAVER picture-uri
+  fi
+  greset $INTERFACE accent-color
+  greset $INTERFACE icon-theme
+  say "FWU-Theme entfernt (die Dunkelmodus-Einstellung bleibt, wie sie ist)."
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+  apply) cmd_apply "$@" ;;
+  wallpaper) cmd_wallpaper "$@" ;;
+  omarchy) cmd_omarchy "$@" ;;
+  status) cmd_status ;;
+  reset) cmd_reset ;;
+  watch) cmd_watch ;;
+  ""|-h|--help|help) usage ;;
+  *) usage; exit 2 ;;
+esac
